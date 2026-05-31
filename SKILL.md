@@ -1,188 +1,156 @@
 ---
-name: hermes-skillevolver
+name: skillevolver
 description: >-
-  Hermes 原生 SkillEvolver — 自动进化技能。给定一个目标 skill 和一组验证任务，
-  通过 策略探索→执行→对比→打补丁→审计 五步循环，让 Hermes 自己改进自己的 skill。
-  灵感来自清华 SkillEvolver 论文 (arXiv:2605.10500)，完全基于 Hermes 原生工具实现，
-  无需外部依赖。
-triggers:
-  - 用户说 "进化/改进/优化 skill X"
-  - 用户说 "evolve skill X" 
-  - 用户说 "让 skill 自己进化"
-  - skill 执行失败后用户要求改进
-category: meta
-tags:
-  - skill-evolution
-  - meta-skill
-  - self-improvement
-  - skillevolver
+  Auto-evolve Agent Skills through contrastive trajectory comparison.
+  5-phase loop: Strategy→Execute→Compare→Patch→Audit.
+  Works on Hermes and OpenCode. Inspired by SkillEvolver (arXiv:2605.10500).
+license: MIT
+compatibility: "hermes opencode crush"
+metadata:
+  audience: agent-developers
+  category: meta-skill
+  inspired_by: "SkillEvolver (arXiv:2605.10500)"
 ---
 
-# Hermes SkillEvolver — 技能自动进化器
+# SkillEvolver — 技能自动进化器
 
-## 概述
+> 让 AI Agent 用**对比学习**自动改进任何 skill。
+> 支持 **Hermes** / **OpenCode (Crush)** 双平台。
 
-这是一个元技能（meta-skill），让 Hermes Agent 用**对比学习**的方式自动改进任何 skill。
+## 核心原理
 
-核心思路：不是让 AI 自我反思("你觉得哪里不好？")，而是**实际执行多个策略，对比成功和失败的轨迹，从中提取改进信号**。
-
-```
-        ┌─────────────┐
-        │  原始 Skill  │
-        └──────┬──────┘
-               │
-  ┌────────────▼────────────┐
-  │ Phase 1: 策略探索       │ 生成 K 个不同的改进策略
-  └────────────┬────────────┘
-               │
-  ┌────────────▼────────────┐
-  │ Phase 2: 并行执行       │ 用 delegate_task 独立执行每个策略
-  └────────────┬────────────┘
-               │
-  ┌────────────▼────────────┐
-  │ Phase 3: 轨迹对比       │ 成功 vs 失败 → 提取 delta 信号
-  └────────────┬────────────┘
-               │
-  ┌────────────▼────────────┐
-  │ Phase 4: 定向打补丁     │ 只改信号指向的部分，不动其他
-  └────────────┬────────────┘
-               │
-  ┌────────────▼────────────┐
-  │ Phase 5: 独立审计       │ 检查过拟合、硬编码等问题
-  └────────────┬────────────┘
-               │
-        ┌──────▼──────┐
-        │ 进化后 Skill │──── 重复 R 轮
-        └─────────────┘
-```
-
-## 输入要求
-
-用户必须提供：
-1. **目标 skill 名** (如 `code-review`, `deploy-check`)
-2. **验证任务文件** — 一个纯文本文件，每行一个任务描述（见下方格式）
-
-可选：
-- `--rounds R` (默认 2)
-- `--strategies K` (默认 3)
-- `--audit` (是否启用审计阶段，默认是)
-
-## 验证任务格式
-
-验证任务文件 (`tasks.txt`) 每行一个任务：
+不靠 AI 自我反思（"你觉得哪里不好？"），而是**实际执行多个改进策略，对比成功和失败的轨迹，从中提取精确的改进信号**。
 
 ```
-# 任务描述（Agent 需要完成的具体操作）
+原始 Skill → ① 策略探索(K个方案) → ② 并行执行(子Agent测试)
+→ ③ 轨迹对比(成vs败) → ④ 定向打补丁(只改信号指向的)
+→ ⑤ 独立审计(过拟合/硬编码检查) → 循环R轮 → 进化后 Skill
+```
+
+## 输入
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| 目标 skill 名 | ✅ | — | 如 `code-review`、`deploy-check` |
+| 验证任务文件 | ✅ | — | 每行一个任务描述 |
+| `--rounds` | ❌ | 2 | 进化轮数 |
+| `--strategies` | ❌ | 3 | 每轮并行策略数 |
+| `--audit` | ❌ | on | 是否启用审计 |
+
+### 验证任务文件格式
+
+```text
+# 每行一个任务描述
 审查 /path/to/file.py 的代码质量
-检查 /etc/nginx/nginx.conf 的语法错误
-分析 /var/log/syslog 最近 100 行的异常
+检查 /etc/nginx/nginx.conf 的语法错误  
+分析 /var/log/syslog 最近 50 行的异常
 ```
-
-每个任务会被用来测试改进后的 skill 是否真的变好了。
 
 ## 执行协议
 
+### Phase 0 — 平台检测
+
+执行前先判断当前运行的 Agent 平台，使用对应的工具：
+
+| 操作 | 🔵 Hermes | 🟢 OpenCode / Crush |
+|------|-----------|---------------------|
+| 读取 skill | `skill_view(name)` | 直接 `read_file` 读取 `SKILL.md` |
+| 修改 skill | `skill_manage(action='patch', ...)` | 直接文件编辑（write/patch） |
+| 并行子 Agent | `delegate_task` | 原生 multi-agent（描述任务让其 spawn） |
+| 审计子 Agent | `delegate_task` | 原生 multi-agent |
+
 ### Phase 1 — 策略探索
 
-1. 用 `skill_view` 读取目标 skill 的完整内容
-2. 用 `read_file` 读取验证任务列表
-3. 分析 skill 的结构，识别：
-   - 哪些步骤不清晰
-   - 缺少什么 pitfall
-   - 触发器是否准确
-   - 验证步骤是否可执行
-4. 生成 K 个**不同的、可执行**的改进策略。每条策略是一个对 skill 的具体修改描述（增补内容、改措辞、加步骤等）。
-
-**策略多样性要求**：策略之间应关注 skill 的不同方面（精确性、覆盖率、鲁棒性、效率），避免雷同。
+1. 读取目标 skill 完整内容
+2. 读取验证任务列表  
+3. 分析 skill 弱点：步骤不清、pits 缺失、触发器不准、验证不可执行
+4. 生成 K 个**不同方向**的改进策略（精确性 / 覆盖率 / 鲁棒性 / 效率，各方向不重叠）
 
 ### Phase 2 — 并行执行
 
-1. 对每条策略，用 `delegate_task` 创建一个子 Agent
-2. 子 Agent 的 context 包含：
-   - 原始 skill 的完整内容
-   - 该策略的具体修改描述
-   - 验证任务列表
-3. 子 Agent 的 goal：**加载修改后的 skill，逐个执行验证任务，报告每个任务的成功/失败及原因**
-4. 子 Agent 的 toolsets: `['terminal', 'file', 'web', 'skills', 'session_search']`
-5. 所有策略的测试**并行执行**（一次 delegate_task 调用，多个 tasks）
+对每条策略，**并行**创建子 Agent 测试：
+
+- 子 Agent 得到原始 skill + 该策略的修改描述 + 验证任务列表
+- 子 Agent 逐任务执行，报告 ✅/❌ 及失败原因
+- **所有策略同时跑**，不串行
 
 ### Phase 3 — 轨迹对比
 
-1. 收集所有子 Agent 的执行报告
-2. 按任务维度对比：
-   - 哪些策略在哪些任务上成功了
-   - 哪些策略在哪些任务上失败了
-   - 成功和失败之间的**关键差异**是什么
-3. 提取 **delta 信号**：
-   - **Skill 缺陷**：所有策略都失败的任务 → skill 本身有结构性问题
-   - **策略收益**：某策略独有的成功 → 该策略的修改有效
-   - **执行失误**：单个策略的偶发失败 → 可能是随机因素，标记但不强制修改
+收集所有子 Agent 报告，提取三种 delta 信号：
 
-4. 输出对比矩阵（成功=✅，失败=❌，部分=⚠️）：
+| 信号类型 | 判定 | 处理 |
+|----------|------|------|
+| **Skill 缺陷** | 所有策略都失败 | skill 本身结构有问题 |
+| **策略收益** | 某策略独自成功 | 该策略的修改有效 |
+| **执行失误** | 偶发单次失败 | 标记，不强制修改 |
+
+输出对比矩阵：
 
 ```
 任务 \ 策略    | 策略A | 策略B | 策略C
-任务1           |  ✅   |  ✅   |  ❌
-任务2           |  ❌   |  ✅   |  ❌
-任务3           |  ✅   |  ✅   |  ✅
+任务1          |  ✅   |  ✅   |  ❌
+任务2          |  ❌   |  ✅   |  ❌  
+任务3          |  ✅   |  ✅   |  ✅
 ```
 
 ### Phase 4 — 定向打补丁
 
-基于 delta 信号，**只修改信号明确指向的部分**：
+**只改信号指向的部分**：
 
-1. **策略收益** → 将成功策略的修改合并进 skill
-2. **Skill 缺陷** → 针对所有策略都失败的任务，添加新的步骤/pitfall/说明
-3. **不要大改**：保留未受影响的段落不变
+- 策略收益 → 合并成功策略的修改
+- Skill 缺陷 → 新增步骤 / pitfall / 说明
+- 未受影响的段落**原样保留**
 
-使用 `skill_manage(action='patch')` 对 skill 进行精准修改。
+Hermes 用 `skill_manage(action='patch')`，OpenCode 用文件编辑。
 
 ### Phase 5 — 独立审计
 
-用一个独立的 **delegate_task** 子 Agent 审计进化后的 skill：
+用一个**独立子 Agent**（非参与进化的 Agent）审计：
 
-审计检查清单：
-- [ ] 是否引入了**过拟合**（只对验证任务有效，对通用场景不适用）
-- [ ] 是否有**硬编码**的具体值/路径/ID
-- [ ] 新增内容是否与原有风格一致
-- [ ] 是否有**冗余**（新增步骤和原有步骤重复）
-- [ ] 是否引入了**安全风险**（过于宽松的权限建议等）
+- [ ] 是否过拟合（只对验证任务有效）
+- [ ] 是否有硬编码的具体值/路径
+- [ ] 新增内容与原有风格是否一致
+- [ ] 是否有冗余（与原有步骤重复）
+- [ ] 是否有安全风险（权限建议过宽等）
 
-审计 Agent 的 context 包含原始 skill 和进化后 skill 的 diff。
-
-如果审计不通过，回退到上一轮的有效版本。
+不通过 → 回退上一轮版本。
 
 ### 循环
 
-重复 Phase 1-5 共 R 轮（默认 2 轮）。每轮基于上一轮进化后的 skill 继续改进。
+重复 Phase 1-5 共 R 轮，每轮基于上一轮结果。
 
-## 输出
+## 跨平台兼容
 
-进化完成后，输出：
+本 skill 产出的 `SKILL.md` 文件遵循 [Agent Skills](https://agentskills.io) 开放标准，**所有平台通用**：
 
-1. **进化报告**：
-   - 原始 skill vs 最终 skill 的关键变化
-   - 每轮的改进点
-   - 验证通过率的变化（如适用）
-
-2. **最终 skill** 已通过 `skill_manage` 更新，用户可直接使用。
+| Agent | Skill 路径 | 执行进化 | 消耗产物 |
+|-------|-----------|---------|---------|
+| Hermes | `~/.hermes/skills/` | ✅ 原生 | ✅ |
+| OpenCode / Crush | `~/.config/opencode/skills/` | ✅ 原生 | ✅ |
+| Claude Code | `~/.claude/skills/` | 需适配 | ✅ |
 
 ## 使用示例
 
 ```
-# 进化 code-review skill，用 examples/tasks.txt 做验证
-进化 code-review skill，任务文件 /root/projects/tasks.txt，3 轮，4 策略
+# Hermes
+进化 code-review skill，任务文件 /root/tasks.txt，3 轮，4 策略
 
-# 快速模式：1 轮，2 策略
-快速进化 deploy-check skill，任务: "检查 nginx 配置" "验证 docker-compose"
+# OpenCode (same SKILL.md, just placed in different location)
+evolve the code-review skill using tasks from tasks.txt, 3 rounds
 ```
 
-## 注意事项 / Pitfalls
+## Pitfalls
 
-- **验证任务要真实**：任务应该是 skill 实际要处理的场景，不是编造的
-- **策略要有区分度**：3 个策略全改同一段话没有意义
-- **对比优于反思**：核心价值在 Phase 3 的对比，不是让 AI 猜哪里不好
-- **补丁优于重写**：Phase 4 用 patch 而非 edit，保持 skill 历史
-- **审计不可跳过**：没有审计的进化容易越改越偏
-- **任务数 ≥ K*2**：确保每个策略有足够任务来暴露优劣
-- **子 Agent 语言**：delegate_task 的 context 中指定 "respond in Chinese" 如果你的验证任务涉及中文输出
+- 任务 ≥ K×2，确保每个策略有足够样本暴露优劣
+- 策略要有区分度——全改同一段没意义
+- **对比 > 反思**——Phase 3 是核心价值所在
+- **补丁 > 重写**——精准编辑，保留 skill 历史
+- 审计不能跳——没有审计的进化越改越偏
+- 子 Agent 语言：context 里指定输出语言
+
+## 参考
+
+- SkillEvolver 论文: [arXiv:2605.10500](https://arxiv.org/abs/2605.10500)
+- EmbodiSkill 论文: [arXiv:2605.10332](https://arxiv.org/abs/2605.10332)
+- Agent Skills 标准: [agentskills.io](https://agentskills.io)
+- 社区开源实现: [github.com/victorzhong0110/skill-evolution](https://github.com/victorzhong0110/skill-evolution)

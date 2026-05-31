@@ -1,46 +1,76 @@
-# Hermes SkillEvolver
+# SkillEvolver
 
-> 让你的 Hermes Agent 自己进化自己的技能。五步对比学习循环，无需外部依赖。
+> 让 AI Agent 自己进化自己的技能。五步对比学习循环。  
+> 支持 **Hermes** · **OpenCode (Crush)** · **Claude Code**
 
-灵感来自清华大学 [SkillEvolver](https://arxiv.org/abs/2605.10500) 和 [EmbodiSkill](https://arxiv.org/abs/2605.10332) 论文。
+灵感来自清华 [SkillEvolver](https://arxiv.org/abs/2605.10500) 论文。
 
 ## 工作原理
 
 ```
-原始 Skill → 策略探索(生成K个方案) → 并行执行(子Agent测试)
-→ 轨迹对比(成败vs成败) → 定向打补丁(只改信号指向的)
-→ 独立审计(过拟合/硬编码检查) → 循环R轮 → 进化后 Skill
+原始 Skill
+  → ① 策略探索（生成 K 个不同改进方案）
+  → ② 并行执行（子 Agent 同时测试所有方案）
+  → ③ 轨迹对比（成 vs 败 → 提取改进信号）
+  → ④ 定向打补丁（只改信号指向的部分）
+  → ⑤ 独立审计（过拟合/硬编码检查）
+  → 循环 R 轮
+  → 进化后 Skill
 ```
+
+**核心思想**：不靠 AI 自我反思，而是实际跑多个策略、对比成败轨迹、精准定位改进点。
 
 ## 快速开始
 
-1. 将 `SKILL.md` 放到 Hermes 的 skills 目录（如 `~/.hermes/skills/meta/hermes-skillevolver/`）
+### Hermes
 
-2. 准备一个验证任务文件 `tasks.txt`，每行一个任务：
+```bash
+# 放置 skill
+cp SKILL.md ~/.hermes/skills/meta/skillevolver/SKILL.md
+
+# 使用
+进化 code-review skill，任务文件 /path/to/tasks.txt
+```
+
+### OpenCode / Crush
+
+```bash
+# 放置 skill
+mkdir -p ~/.config/opencode/skills/skillevolver
+cp SKILL.md ~/.config/opencode/skills/skillevolver/SKILL.md
+
+# 使用
+evolve the code-review skill using /path/to/tasks.txt
+```
+
+### 验证任务文件
+
+`tasks.txt` 每行一个任务：
+
 ```
 审查 /path/to/file.py 的代码质量
 检查 /etc/nginx/nginx.conf 的语法错误
-分析 /var/log/syslog 最近 100 行的异常
+分析 /var/log/syslog 最近 50 行的异常
 ```
 
-3. 在 Hermes 中调用：
-```
-进化 code-review skill，任务文件 /root/tasks.txt，2 轮，3 策略
-```
+## 跨平台
+
+| Agent | Skill 路径 | 执行进化 | 产物 |
+|-------|-----------|---------|------|
+| Hermes | `~/.hermes/skills/` | ✅ 原生 | ✅ |
+| OpenCode / Crush | `~/.config/opencode/skills/` | ✅ 原生 | ✅ |
+| Claude Code | `~/.claude/skills/` | 需适配 | ✅ |
+
+产出的 `SKILL.md` 文件基于 [Agent Skills](https://agentskills.io) 开放标准，所有平台通用。
 
 ## 依赖
 
-- Hermes Agent（自带所有工具）
-- 无需任何外部 pip 包、API key
-
-## 核心设计
-
-- **对比优于反思**：对比成功/失败轨迹提取改进信号，而非让 AI 自我反思
-- **补丁优于重写**：用 `skill_manage patch` 精准修改，保留 skill 历史
-- **独立审计**：独立子 Agent 检查过拟合/硬编码/安全风险
-- **并行执行**：K 个策略用 `delegate_task` 并行测试，不串行等待
+- 零外部依赖
+- 无需 API key
+- 只用到 Agent 自身的文件读写和子 Agent 能力
 
 ## 论文
 
-- SkillEvolver: [arXiv:2605.10500](https://arxiv.org/abs/2605.10500)
-- EmbodiSkill: [arXiv:2605.10332](https://arxiv.org/abs/2605.10332)
+- [SkillEvolver (arXiv:2605.10500)](https://arxiv.org/abs/2605.10500)
+- [EmbodiSkill (arXiv:2605.10332)](https://arxiv.org/abs/2605.10332)
+- 社区实现: [victorzhong0110/skill-evolution](https://github.com/victorzhong0110/skill-evolution)
