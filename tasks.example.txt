@@ -1,0 +1,5 @@
+# 验证任务示例 - 每行一个任务描述
+# 用于 code-review skill 的验证
+审查 /root/.hermes/skills/troubleshooting/vision-fallback/SKILL.md 的内容质量
+分析 /etc/nginx/nginx.conf 是否有语法错误（如果存在）
+检查 /var/log/syslog 最近 50 行有无异常
